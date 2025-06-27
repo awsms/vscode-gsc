@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import type { CallableDef, ParamDef, VariableDef } from "../models/Def";
+import type { CallableDef, ParamDef, VariableDef } from "../models/Callable";
 
 export const getTypesString = (types?: string[]) => (types?.length ? types.join("/") : "");
 export const getVariableString = (v: VariableDef) => v.name || getTypesString(v.types) || "unknown";
@@ -16,9 +16,9 @@ export const createParamsUsage = (def: CallableDef) => {
 };
 export const createUsage = (def: CallableDef) => {
 	const receiver = def.receiver ? `<${getVariableString(def.receiver)}> ` : "";
-	const ident = def.ident.name;
+	const name = def.name.text;
 	const params = createParamsUsage(def).join(", ");
-	return `${receiver}${ident}(${params})`;
+	return `${receiver}${name}(${params})`;
 };
 
 export const createDocumentation = (
