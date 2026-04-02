@@ -13,6 +13,8 @@ export const createCompletionItemProvider = (
 ): vscode.CompletionItemProvider => ({
 	async provideCompletionItems(document, position, token, context) {
 		const file = stores.gsc.ensureFile(document);
+		const filesystem = await stores.gsc.getFilesystem(document);
+		if (token.isCancellationRequested) return;
 		if (context.triggerCharacter) {
 			if (context.triggerCharacter === ":") {
 				// only trigger on double colon
@@ -54,32 +56,35 @@ export const createCompletionItemProvider = (
 			const createCallablesScript = (defs: Iterable<CallableDefScript>) => {
 				if (!enableCallablesScript) return;
 				for (const def of defs) {
+					const script = filesystem.getScriptByFile(def.file);
 					items.push(
 						createCallableCompletionItem(def, document.languageId, {
 							concise: conciseMode,
 							local: def.file === file,
+							description: script?.path,
 						}),
 					);
 				}
 			};
 
 			const createCallablesScope = async () => {
-				const defsScope = await file.getCallableDefsScope();
-				if (token.isCancellationRequested) return;
+				const script = filesystem.getScriptByFile(file);
 				createCallablesGame();
+				if (!script) return;
+				const defsScope = await script.getCallableDefsScope();
+				if (token.isCancellationRequested) return;
 				createCallablesScript(defsScope.values());
 			};
 
-			const createGscScripts = (scriptDir: GscScriptDir, isDirective = false) => {
-				const foldersToTop = intelliSense.foldersSorting.value === "top";
-				const filesToTop = intelliSense.foldersSorting.value === "bottom";
+			const createGscScripts = (scriptDir: ScriptDir, isDirective = false) => {
+				const foldersSorting = intelliSense.foldersSorting.get(document);
+				const foldersToTop = foldersSorting === "top";
+				const filesToTop = foldersSorting === "bottom";
 				for (const [foldername] of scriptDir.children) {
 					items.push(createFolderCompletionItem(foldername, foldersToTop));
 				}
 				for (const [, script] of scriptDir.scripts) {
-					const file = script.getFile();
-					if (!file) continue;
-					items.push(createFileCompletionItem(file.filename, filesToTop, !isDirective));
+					items.push(createFileCompletionItem(script.name, filesToTop, !isDirective));
 				}
 			};
 
@@ -110,7 +115,7 @@ export const createCompletionItemProvider = (
 					await createCallablesScope();
 					return items;
 				}
-				const file = stores.gsc.getScript(scriptPath)?.getFile();
+				const file = filesystem.getScriptByPath(scriptPath)?.file;
 				if (!file) return items;
 				const defs = await file.getCallableDefs();
 				if (token.isCancellationRequested) return items;
@@ -125,7 +130,7 @@ export const createCompletionItemProvider = (
 			const parentScriptPath =
 				lastSlashIndex !== -1 ? partialScriptPath.slice(0, lastSlashIndex) : "";
 
-			const scriptDir = stores.gsc.getScriptDir(parentScriptPath);
+			const scriptDir = filesystem.getScriptDirByPath(parentScriptPath);
 			if (!scriptDir) return items;
 			const preScriptPathText = partialScriptMatch
 				? readLines(partialScriptMatch.index!)
@@ -156,6 +161,7 @@ const createCallableCompletionItem = (
 	options: {
 		local?: boolean;
 		concise?: boolean;
+		description?: string;
 	},
 ): vscode.CompletionItem => {
 	const isGame = def.origin === "game";
@@ -165,8 +171,8 @@ const createCallableCompletionItem = (
 			description: options.local
 				? undefined
 				: isGame
-					? `${def.module} (${def.featureset})`
-					: def.file.script?.path,
+					? def.module
+					: options.description,
 		},
 		detail: createUsage(def),
 		documentation: createDocumentation(def, languageId, { concise: options.concise }),

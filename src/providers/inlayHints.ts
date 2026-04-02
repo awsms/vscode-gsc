@@ -1,15 +1,24 @@
 import * as vscode from "vscode";
 
-import type { Stores } from "../stores";
+import type { Stores } from "../models/Store";
 
 export const createInlayHintsProvider = (stores: Stores): vscode.InlayHintsProvider => ({
-	async provideInlayHints(document, range, token) {
+	async provideInlayHints(document, queryRange, token) {
 		const result: vscode.InlayHint[] = [];
-		const usages = await stores.gsc.getFile(document).getCallableInstances();
+		const file = stores.gsc.getFile(document);
+		if (!file) return result;
+		const filesystem = await stores.gsc.getFilesystem(document);
+		if (token.isCancellationRequested) return;
+		const script = filesystem.getScriptByFile(file);
+		if (!script) return result;
+
+		const usages = await file.getCallableUsages();
+		if (token.isCancellationRequested) return;
+		const defs = await script.getCallableUsageDefs();
 		if (token.isCancellationRequested) return;
 
-		for (const { range, value: usage } of usages.byRange) {
-			const def = usage.def;
+		for (const { range, value: usage } of queryRange ? usages.getIn(queryRange) : usages) {
+			const def = defs.get(usage);
 			if (!def || !def.params) continue;
 			if (usage.kind !== "call") continue;
 			if (range.start.isAfter(usage.paramList.range.start)) continue;

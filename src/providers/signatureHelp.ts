@@ -1,17 +1,25 @@
 import * as vscode from "vscode";
 
 import type { CallableDef } from "../models/Callable";
-import type { Stores } from "../stores";
+import type { Stores } from "../models/Store";
 
 import { createParamsUsage } from "./shared";
 
 export const createSignatureHelpProvider = (stores: Stores): vscode.SignatureHelpProvider => ({
 	async provideSignatureHelp(document, position, token, _context) {
 		const file = stores.gsc.getFile(document);
-		const usages = await file.getCallableInstances();
+		if (!file) return;
+		const filesystem = await stores.gsc.getFilesystem(document);
+		if (token.isCancellationRequested) return;
+		const script = filesystem.getScriptByFile(file);
+		if (!script) return;
+
+		const usages = await file.getCallableUsages();
+		if (token.isCancellationRequested) return;
+		const defs = await script.getCallableUsageDefs();
 		if (token.isCancellationRequested) return;
 
-		const usagesAtPos = usages.byRange.getAt(position);
+		const usagesAtPos = usages.getAt(position);
 		for (let i = usagesAtPos.length - 1; i >= 0; i--) {
 			const usage = usagesAtPos[i].value;
 			if (usage.kind !== "call") continue;
@@ -19,7 +27,7 @@ export const createSignatureHelpProvider = (stores: Stores): vscode.SignatureHel
 			let activeParameterIndex = usage.params.indexAt(position, true);
 			if (activeParameterIndex === -1) continue; // not inside parameter list
 
-			const def = usage.def;
+			const def = defs.get(usage);
 			if (!def?.params) return;
 
 			if (def.paramsRepeatable === "last" && activeParameterIndex >= def.params.length) {

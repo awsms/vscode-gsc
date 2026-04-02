@@ -1,8 +1,6 @@
 import * as vscode from "vscode";
 
-import type { Stores } from "../stores";
-
-import { escapeRegExp } from "../util";
+import type { Stores } from "../models/Store";
 
 export const createSemanticTokensProvider = (
 	stores: Stores,
@@ -34,16 +32,23 @@ const provideSemanticTokens = async (
 ) => {
 	const builder = new vscode.SemanticTokensBuilder();
 	const file = stores.gsc.getFile(document);
+	if (!file) return builder.build();
+	const filesystem = await stores.gsc.getFilesystem(document);
+	if (token.isCancellationRequested) return;
+	const script = filesystem.getScriptByFile(file);
+	if (!script) return builder.build();
 
 	const defs = await file.getCallableDefs();
 	if (token.isCancellationRequested) return;
-	const usages = await file.getCallableInstances();
+	const usages = await file.getCallableUsages();
+	if (token.isCancellationRequested) return;
+	const usageDefs = await script.getCallableUsageDefs();
 	if (token.isCancellationRequested) return;
 
 	const defsIterable = range ? defs.byRange.getIn(range, true) : defs.byRange;
 	for (const { value: def } of defsIterable) {
 		const { name, params, body } = def;
-		builder.push(name.range.start.line, name.range.start.character, name.name.length, 0, 0b1);
+		builder.push(name.range.start.line, name.range.start.character, name.text.length, 0, 0b1);
 		for (const { range } of params) {
 			const length = document.offsetAt(range.end) - document.offsetAt(range.start);
 			builder.push(range.start.line, range.start.character, length, 2, 0b1);
@@ -54,17 +59,14 @@ const provideSemanticTokens = async (
 		}
 	}
 
-	const usagesIterable = range ? usages.byRange.getIn(range) : usages.byRange;
+	const usagesIterable = range ? usages.getIn(range) : usages;
 	for (const { value: usage } of usagesIterable) {
-		const def = usage.def;
+		const def = usageDefs.get(usage);
 		if (!def) continue;
-		if (def.origin === "game") {
-			const start = usage.name.range.start;
-			const length = usage.name.text.length;
-			const type = def.receiver ? 1 : 0;
-			const modifiers = def.deprecated ? 0b110 : 0b010;
-			builder.push(start.line, start.character, length, type, modifiers);
-		}
+		const start = usage.name.range.start;
+		const length = usage.name.text.length;
+		const type = def.receiver ? 1 : 0;
+		builder.push(start.line, start.character, length, type, 0);
 	}
 
 	return builder.build();
