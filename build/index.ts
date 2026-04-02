@@ -102,11 +102,18 @@ for (const engine of engines) {
 }
 
 const contributes = createContributes(engines);
+const {
+	scripts: _scripts,
+	devDependencies: _devDependencies,
+	packageManager: _packageManager,
+	type: _type,
+	...distPackageJson
+} = packageJson;
 writePromises.push(
 	writeJSON(new URL("package.json", outDir), {
-		...packageJson,
+		...distPackageJson,
 		type: "commonjs",
-		main: "./",
+		main: "./index.js",
 		contributes,
 	}),
 );
